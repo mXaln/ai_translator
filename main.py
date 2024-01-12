@@ -1,10 +1,25 @@
-import tkinter as tk
-from tkinter import ttk
+from functools import partial
+from threading import Thread
 
+from kivy.app import App
+from kivy.clock import mainthread
+from kivy.properties import ObjectProperty, StringProperty, NumericProperty, ListProperty
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.button import Button
+from kivy.uix.label import Label
+from kivy.uix.popup import Popup
+from kivy.uix.widget import Widget
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 
 
-class App(tk.Tk):
+class BlockingOverlay(BoxLayout):
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos) and self.opacity > 0:
+            return True
+        return super(BlockingOverlay, self).on_touch_down(touch)
+
+
+class MainView(Widget):
     languages = {
         "Acehnese (Arabic script)": "ace_Arab",
         "Acehnese (Latin script)": "ace_Latn",
@@ -212,109 +227,109 @@ class App(tk.Tk):
         "Zulu": "zul_Latn"
     }
 
-    src_lang = None
-    src_input = None
-    target_lang = None
-    target_input = None
-
     model = None
     tokenizer = None
 
-    sorted_languages = {}
+    langs = ListProperty()
+    src_selected = StringProperty()
+    target_selected = StringProperty()
 
-    def __init__(self):
-        super().__init__()
+    src_text = StringProperty()
+    target_text = StringProperty()
 
-        self.sorted_languages = dict(sorted(self.languages.items()))
+    overlay_opacity = NumericProperty(0)
+    overlay_text = StringProperty()
 
-        self.init_model()
-        self.build_ui()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
-    def init_model(self):
-        self.model = AutoModelForSeq2SeqLM.from_pretrained("facebook/nllb-200-distilled-600M")
-        self.tokenizer = AutoTokenizer.from_pretrained("facebook/nllb-200-distilled-600M")
+        sorted_languages = dict(sorted(self.languages.items()))
 
-    def build_ui(self):
-        self.title("Translator")
-        self.geometry("700x400")
-        self.minsize(700, 400)
+        self.langs = tuple(sorted_languages.keys())
+        self.src_selected = "Select Source Language"
+        self.target_selected = "Select Target Language"
 
-        # create all the main containers
-        top_pane = tk.Frame(self, pady=10)
-        center_pane = tk.Frame(self, padx=10, pady=10)
-        left_pane = tk.Frame(center_pane, padx=5, pady=5)
-        right_pane = tk.Frame(center_pane, padx=5, pady=5)
-        bottom_pane = tk.Frame(self, pady=10)
+    def load_model(self):
+        if self.model is None:
+            self.model = AutoModelForSeq2SeqLM.from_pretrained("facebook/nllb-200-distilled-600M")
+        if self.tokenizer is None:
+            self.tokenizer = AutoTokenizer.from_pretrained("facebook/nllb-200-distilled-600M")
 
-        # layout all the main containers
-        self.grid_rowconfigure(1, weight=1)
-        self.grid_columnconfigure(0, weight=1)
-
-        center_pane.grid_rowconfigure(0, weight=1)
-        center_pane.grid_columnconfigure(0, weight=1)
-        center_pane.grid_columnconfigure(1, weight=1)
-
-        left_pane.grid_rowconfigure(1, weight=1)
-        left_pane.grid_columnconfigure(0, weight=1)
-        right_pane.grid_rowconfigure(1, weight=1)
-        right_pane.grid_columnconfigure(0, weight=1)
-
-        top_pane.grid(row=0)
-        center_pane.grid(row=1, sticky="nsew")
-        bottom_pane.grid(row=3)
-
-        left_pane.grid(row=0, column=0, sticky="nsew")
-        right_pane.grid(row=0, column=1, sticky="nsew")
-
-        # Top pane widgets
-        top_label = ttk.Label(top_pane, text="Translator")
-        top_label.grid(row=0)
-
-        # Center-Left pane widgets
-        # Source language part
-        self.src_lang = tk.StringVar(value="Select Source Language")
-        src_list = ttk.Combobox(left_pane, textvariable=self.src_lang, state="readonly")
-        src_list["values"] = list(self.sorted_languages.keys())
-        src_list.grid(row=0, column=0, sticky="ew")
-
-        self.src_input = tk.Text(left_pane)
-        self.src_input.grid(row=1, column=0, sticky="nsew")
-
-        # Center-Right pane widgets
-        # Target language part
-        self.target_lang = tk.StringVar(value="Select Target Language")
-        target_list = ttk.Combobox(right_pane, textvariable=self.target_lang, state="readonly")
-        target_list["values"] = list(self.sorted_languages.keys())
-        target_list.grid(row=0, column=0, sticky="ew")
-
-        self.target_input = tk.Text(right_pane)
-        self.target_input.grid(row=1, column=0, sticky="nsew")
-
-        # Bottom pane widgets
-        button = ttk.Button(bottom_pane, text="Translate", width=10, command=self.translate)
-        button.grid(row=0)
-
-    def translate(self):
+    def translate(self, *args):
         try:
-            src_lang = self.sorted_languages[self.src_lang.get()]
-            target_lang = self.sorted_languages[self.target_lang.get()]
-            src_text = self.src_input.get("1.0", tk.END).strip()
+            src_lang = self.languages[self.src_selected]
+            target_lang = self.languages[self.target_selected]
+            src_text = self.src_text
 
             if src_text != "":
-                translator = pipeline("translation",
-                                      model=self.model, tokenizer=self.tokenizer,
-                                      src_lang=src_lang, tgt_lang=target_lang,
-                                      max_length=4000)
-                payload = translator(src_text)
-                result = payload[0]["translation_text"]
+                self.show_progress()
 
-                self.target_input.delete("1.0", tk.END)
-                self.target_input.insert("1.0", result)
+                Thread(target=partial(self.do_translate, src_lang, target_lang, src_text)).start()
+            else:
+                self.show_popup("Error", "Enter text to translate.")
 
         except Exception as error:
             print(error)
+            self.show_popup("Error", str(error))
+
+    def do_translate(self, src_lang, target_lang, src_text):
+        App.get_running_app().root.update_progress("Loading model...")
+        self.load_model()
+
+        App.get_running_app().root.update_progress("Translating...")
+        translator = pipeline("translation",
+                              model=self.model, tokenizer=self.tokenizer,
+                              src_lang=src_lang, tgt_lang=target_lang,
+                              max_length=4000)
+        payload = translator(src_text)
+        print(payload)
+        result = payload[0]["translation_text"]
+
+        App.get_running_app().root.update_target(result)
+        App.get_running_app().root.hide_progress()
+
+    @mainthread
+    def update_target(self, result):
+        self.target_text = result
+
+    @mainthread
+    def show_popup(self, title, message):
+        layout = BoxLayout(orientation="vertical")
+
+        label = Label(text=message)
+        close = Button(text="OK",
+                       size_hint=(None, None), width=100, height=40,
+                       pos_hint={'center_x': 0.5, 'center_y': 0.5})
+
+        layout.add_widget(label)
+        layout.add_widget(close)
+
+        popup = Popup(title=title, content=layout, size_hint=(None, None), width=600, height=400)
+        popup.open()
+
+        close.bind(on_release=popup.dismiss)
+
+    @mainthread
+    def show_progress(self):
+        self.overlay_opacity = 0.9
+
+    @mainthread
+    def hide_progress(self):
+        self.overlay_opacity = 0
+
+    @mainthread
+    def update_progress(self, message):
+        self.overlay_text = message
+
+
+class AiTranslator(App):
+    def build(self):
+        return MainView()
+
+
+def main():
+    AiTranslator().run()
 
 
 if __name__ == "__main__":
-    app = App()
-    app.mainloop()
+    main()
