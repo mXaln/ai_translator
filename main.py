@@ -248,8 +248,7 @@ class MainView(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        self.keyboard = Window.request_keyboard(self.keyboard_closed, self)
-        self.keyboard.bind(on_key_up=self.on_key_up)
+        Window.bind(on_key_down=self.on_key_down)
 
         self.sorted_languages = dict(sorted(self.languages.items()))
 
@@ -257,9 +256,11 @@ class MainView(Widget):
         self.src_selected = "Select Source Language"
         self.target_selected = "Select Target Language"
 
-    def keyboard_closed(self):
-        self.keyboard.unbind(on_key_up=self.on_key_up)
-        self.keyboard = None
+    def on_key_down(self, window, keyboard, keycode, text, modifiers):
+        if self.src_dropdown.is_open:
+            self.find_lang(self.src_dropdown, text)
+        elif self.target_dropdown.is_open:
+            self.find_lang(self.target_dropdown, text)
 
     def on_key_up(self, keyboard, keycode):
         code = keycode[1]
@@ -315,20 +316,29 @@ class MainView(Widget):
             self.show_popup("Error", str(error))
 
     def do_translate(self, src_lang, target_lang, src_text):
-        App.get_running_app().root.update_progress("Loading model...")
+        view = App.get_running_app().root
+
+        view.update_progress("Loading model...")
         self.load_model()
 
-        App.get_running_app().root.update_progress("Translating...")
+        view.update_progress("Translating...")
         translator = pipeline("translation",
                               model=self.model, tokenizer=self.tokenizer,
                               src_lang=src_lang, tgt_lang=target_lang,
-                              max_length=4000)
-        payload = translator(src_text)
-        print(payload)
-        result = payload[0]["translation_text"]
+                              max_length=1000000)
 
-        App.get_running_app().root.update_target(result)
-        App.get_running_app().root.hide_progress()
+        target_text = ""
+
+        for line in src_text.splitlines():
+            payload = translator(line)
+
+            if line.strip():
+                target_text += payload[0]["translation_text"]
+            else:
+                target_text += "\n\n"
+
+        view.update_target(target_text)
+        view.hide_progress()
 
     @mainthread
     def update_target(self, result):
