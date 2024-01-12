@@ -1,6 +1,6 @@
 from functools import partial
 from threading import Thread
-
+from kivy.core.window import Window
 from kivy.app import App
 from kivy.clock import mainthread
 from kivy.properties import ObjectProperty, StringProperty, NumericProperty, ListProperty
@@ -226,6 +226,7 @@ class MainView(Widget):
         "Standard Malay": "zsm_Latn",
         "Zulu": "zul_Latn"
     }
+    sorted_languages = {}
 
     model = None
     tokenizer = None
@@ -240,14 +241,55 @@ class MainView(Widget):
     overlay_opacity = NumericProperty(0)
     overlay_text = StringProperty()
 
+    src_dropdown = ObjectProperty(None)
+    target_dropdown = ObjectProperty(None)
+    last_found_lang = StringProperty()
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        sorted_languages = dict(sorted(self.languages.items()))
+        self.keyboard = Window.request_keyboard(self.keyboard_closed, self)
+        self.keyboard.bind(on_key_up=self.on_key_up)
 
-        self.langs = tuple(sorted_languages.keys())
+        self.sorted_languages = dict(sorted(self.languages.items()))
+
+        self.langs = tuple(self.sorted_languages.keys())
         self.src_selected = "Select Source Language"
         self.target_selected = "Select Target Language"
+
+    def keyboard_closed(self):
+        self.keyboard.unbind(on_key_up=self.on_key_up)
+        self.keyboard = None
+
+    def on_key_up(self, keyboard, keycode):
+        code = keycode[1]
+
+        if self.src_dropdown.is_open:
+            self.find_lang(self.src_dropdown, code)
+        elif self.target_dropdown.is_open:
+            self.find_lang(self.target_dropdown, code)
+
+        return True
+
+    def find_lang(self, widget, key):
+        keys = list(self.sorted_languages.keys())
+        found = [k for k in keys if k.lower().startswith(key)]
+
+        if found:
+            for lang in found:
+                curr_index = found.index(lang)
+                last_index = found.index(self.last_found_lang) if self.last_found_lang in found else -1
+
+                if lang != self.last_found_lang and curr_index > last_index:
+                    self.last_found_lang = lang
+                    break
+
+                if last_index == len(found) - 1:
+                    self.last_found_lang = ""
+                    break
+
+            if self.last_found_lang:
+                widget.text = self.last_found_lang
 
     def load_model(self):
         if self.model is None:

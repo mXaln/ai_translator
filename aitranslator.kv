@@ -1,8 +1,20 @@
+#:import utils kivy.utils
+#:import Factory kivy.factory.Factory
+
+<SpinnerOptions@SpinnerOption>:
+    height: 60
+
+<SpinnerDropdown@DropDown>:
+    max_height: 700
+
 <MainView>
 
     src_selected: src_dropdown.text
     target_selected: target_dropdown.text
     src_text: src_input.text
+
+    src_dropdown: src_dropdown
+    target_dropdown: target_dropdown
 
     BoxLayout:
         id: workspace
@@ -25,6 +37,12 @@
                     text: root.src_selected
                     values: root.langs
 
+                    background_normal: ""
+                    background_color: 235/255, 66/255, 66/255
+
+                    dropdown_cls: Factory.get("SpinnerDropdown")
+                    option_cls: Factory.get("SpinnerOptions")
+
                 TextInput:
                     id: src_input
 
@@ -38,6 +56,12 @@
                     text: root.target_selected
                     values: root.langs
 
+                    background_normal: ""
+                    background_color: 28/255, 153/255, 32/255
+
+                    dropdown_cls: Factory.get("SpinnerDropdown")
+                    option_cls: Factory.get("SpinnerOptions")
+
                 TextInput:
                     text: root.target_text
                     readonly: True
@@ -49,9 +73,12 @@
             text: "Translate"
 
             size_hint: None, None
-            width: 300
+            width: 400
             height: 80
             pos_hint: {"center_x": 0.5, "center_y": 0.5}
+
+            background_normal: ""
+            background_color: utils.get_color_from_hex("#0442b5")
 
             on_release: root.translate()
 
