@@ -21,6 +21,7 @@ class WorkspaceWidget(QtWidgets.QWidget):
 
         translate_btn.setStyleSheet("""
             QPushButton {
+                color: white;
                 background-color: rgb(0, 64, 184);
                 border-radius : 4px;
                 border: 1px solid rgb(0, 25, 71);

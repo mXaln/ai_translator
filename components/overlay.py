@@ -11,6 +11,7 @@ class OverlayWidget(QtWidgets.QLabel):
 
         palette = self.palette()
         palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor(22, 22, 22, 200))
+        palette.setColor(QtGui.QPalette.ColorRole.WindowText, QtCore.Qt.GlobalColor.white)
         self.setPalette(palette)
 
         self.setVisible(False)
