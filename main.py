@@ -1,25 +1,35 @@
-from functools import partial
-from threading import Thread
-from kivy.core.window import Window
-from kivy.app import App
-from kivy.clock import mainthread
-from kivy.properties import ObjectProperty, StringProperty, NumericProperty, ListProperty
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
-from kivy.uix.label import Label
-from kivy.uix.popup import Popup
-from kivy.uix.widget import Widget
+from PyQt5 import QtWidgets, QtCore
+
+from components.overlay import OverlayWidget
+from components.workspace import WorkspaceWidget
+from models.languages import LanguagesModel
 from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 
 
-class BlockingOverlay(BoxLayout):
-    def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos) and self.opacity > 0:
-            return True
-        return super(BlockingOverlay, self).on_touch_down(touch)
+class TranslatorSignals(QtCore.QObject):
+    error = QtCore.pyqtSignal(str)
+    result = QtCore.pyqtSignal(object)
 
 
-class MainView(Widget):
+class Translator(QtCore.QRunnable):
+    def __init__(self, fn, *args, **kwargs):
+        super(Translator, self).__init__()
+
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+        self.signals = TranslatorSignals()
+
+    @QtCore.pyqtSlot()
+    def run(self):
+        try:
+            result = self.fn(*self.args, **self.kwargs)
+            self.signals.result.emit(result)
+        except Exception as e:
+            self.signals.error.emit(str(e))
+
+
+class MainWindow(QtWidgets.QMainWindow):
     languages = {
         "Acehnese (Arabic script)": "ace_Arab",
         "Acehnese (Latin script)": "ace_Latn",
@@ -226,161 +236,155 @@ class MainView(Widget):
         "Standard Malay": "zsm_Latn",
         "Zulu": "zul_Latn"
     }
-    sorted_languages = {}
+
+    overlay = None
+    lang_model = None
+
+    target_text = ""
 
     model = None
     tokenizer = None
 
-    langs = ListProperty()
-    src_selected = StringProperty()
-    target_selected = StringProperty()
+    def __init__(self):
+        super().__init__()
 
-    src_text = StringProperty()
-    target_text = StringProperty()
+        self.threadpool = QtCore.QThreadPool()
 
-    overlay_opacity = NumericProperty(0)
-    overlay_text = StringProperty()
+        self.languages = dict(sorted(self.languages.items()))
+        self.lang_model = LanguagesModel(self.languages)
 
-    src_dropdown = ObjectProperty(None)
-    target_dropdown = ObjectProperty(None)
-    last_found_lang = StringProperty()
+        self.setWindowTitle("AiTranslator")
+        self.setMinimumSize(QtCore.QSize(500, 400))
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        layout = QtWidgets.QStackedLayout()
+        layout.setStackingMode(QtWidgets.QStackedLayout.StackingMode.StackAll)
 
-        Window.bind(on_key_down=self.on_key_down)
+        self.workspace = WorkspaceWidget(self.lang_model)
+        self.workspace.translate.connect(self.on_translate)
+        layout.addWidget(self.workspace)
 
-        self.sorted_languages = dict(sorted(self.languages.items()))
+        self.overlay = OverlayWidget("...")
+        layout.addWidget(self.overlay)
 
-        self.langs = tuple(self.sorted_languages.keys())
-        self.src_selected = "Select Source Language"
-        self.target_selected = "Select Target Language"
+        widget = QtWidgets.QWidget()
+        widget.setLayout(layout)
+        self.setCentralWidget(widget)
 
-    def on_key_down(self, window, keyboard, keycode, text, modifiers):
-        if self.src_dropdown.is_open:
-            self.find_lang(self.src_dropdown, text)
-        elif self.target_dropdown.is_open:
-            self.find_lang(self.target_dropdown, text)
+    def show_overlay(self):
+        self.overlay.setVisible(True)
 
-    def on_key_up(self, keyboard, keycode):
-        code = keycode[1]
+    def hide_overlay(self):
+        self.overlay.setVisible(False)
 
-        if self.src_dropdown.is_open:
-            self.find_lang(self.src_dropdown, code)
-        elif self.target_dropdown.is_open:
-            self.find_lang(self.target_dropdown, code)
+    def update_overlay(self, message):
+        self.overlay.setText(message)
 
-        return True
+    def on_translate(self):
+        self.show_overlay()
+        self.start_model_loader()
 
-    def find_lang(self, widget, key):
-        keys = list(self.sorted_languages.keys())
-        found = [k for k in keys if k.lower().startswith(key)]
+    def start_translator(self):
+        src_lang = self.get_source_lang()
+        target_lang = self.get_target_lang()
+        src_text = self.get_source_text().strip()
 
-        if found:
-            for lang in found:
-                curr_index = found.index(lang)
-                last_index = found.index(self.last_found_lang) if self.last_found_lang in found else -1
-
-                if lang != self.last_found_lang and curr_index > last_index:
-                    self.last_found_lang = lang
-                    break
-
-                if last_index == len(found) - 1:
-                    self.last_found_lang = ""
-                    break
-
-            if self.last_found_lang:
-                widget.text = self.last_found_lang
-
-    def load_model(self):
-        if self.model is None:
-            self.model = AutoModelForSeq2SeqLM.from_pretrained("facebook/nllb-200-distilled-600M")
-        if self.tokenizer is None:
-            self.tokenizer = AutoTokenizer.from_pretrained("facebook/nllb-200-distilled-600M")
-
-    def translate(self, *args):
         try:
-            src_lang = self.languages[self.src_selected]
-            target_lang = self.languages[self.target_selected]
-            src_text = self.src_text
+            if src_lang not in self.languages:
+                raise Exception("Select source language.")
 
-            if src_text != "":
-                self.show_progress()
+            if target_lang not in self.languages:
+                raise Exception("Select target language.")
 
-                Thread(target=partial(self.do_translate, src_lang, target_lang, src_text)).start()
-            else:
-                self.show_popup("Error", "Enter text to translate.")
+            if src_text == "":
+                raise Exception("Source text cannot be empty.")
 
-        except Exception as error:
-            print(error)
-            self.show_popup("Error", str(error))
+            src_code = self.languages[src_lang]
+            target_code = self.languages[target_lang]
+
+            translator = Translator(self.do_translate, src_code, target_code, src_text)
+            translator.signals.result.connect(self.on_translate_done)
+            translator.signals.error.connect(self.on_translator_error)
+
+            self.threadpool.start(translator)
+        except Exception as e:
+            self.on_translator_error(str(e))
 
     def do_translate(self, src_lang, target_lang, src_text):
-        view = App.get_running_app().root
-
-        view.update_progress("Loading model...")
-        self.load_model()
-
-        view.update_progress("Translating...")
         translator = pipeline("translation",
                               model=self.model, tokenizer=self.tokenizer,
                               src_lang=src_lang, tgt_lang=target_lang,
                               max_length=1000000)
 
         target_text = ""
-
         for line in src_text.splitlines():
-            payload = translator(line)
-
-            if line.strip():
-                target_text += payload[0]["translation_text"]
+            text = line.strip()
+            if text:
+                payload = translator(text)
+                target_text += payload[0]["translation_text"] + "\n"
             else:
                 target_text += "\n\n"
 
-        view.update_target(target_text)
-        view.hide_progress()
+        return target_text
 
-    @mainthread
-    def update_target(self, result):
-        self.target_text = result
+    def start_model_loader(self):
+        self.update_overlay("Loading models...")
 
-    @mainthread
-    def show_popup(self, title, message):
-        layout = BoxLayout(orientation="vertical")
+        if self.model is None and self.tokenizer is None:
+            model_loader = Translator(self.load_models)
+            model_loader.signals.result.connect(self.on_models_loaded)
+            model_loader.signals.error.connect(self.on_translator_error)
 
-        label = Label(text=message)
-        close = Button(text="OK",
-                       size_hint=(None, None), width=100, height=40,
-                       pos_hint={'center_x': 0.5, 'center_y': 0.5})
+            self.threadpool.start(model_loader)
+        else:
+            self.on_models_loaded((self.model, self.tokenizer))
 
-        layout.add_widget(label)
-        layout.add_widget(close)
+    def load_models(self):
+        model = AutoModelForSeq2SeqLM.from_pretrained("facebook/nllb-200-distilled-600M")
+        tokenizer = AutoTokenizer.from_pretrained("facebook/nllb-200-distilled-600M")
 
-        popup = Popup(title=title, content=layout, size_hint=(None, None), width=600, height=400)
-        popup.open()
+        return model, tokenizer
 
-        close.bind(on_release=popup.dismiss)
+    def on_models_loaded(self, models):
+        self.model, self.tokenizer = models
 
-    @mainthread
-    def show_progress(self):
-        self.overlay_opacity = 0.9
+        self.update_overlay("Translating...")
+        self.start_translator()
 
-    @mainthread
-    def hide_progress(self):
-        self.overlay_opacity = 0
+    def on_translate_done(self, text):
+        self.set_target_text(text)
+        self.hide_overlay()
 
-    @mainthread
-    def update_progress(self, message):
-        self.overlay_text = message
+    def on_translator_error(self, error):
+        self.hide_overlay()
 
+        QtWidgets.QMessageBox.critical(self, "An error occurred", error)
 
-class AiTranslator(App):
-    def build(self):
-        return MainView()
+    def set_source_text(self, text):
+        self.workspace.set_source_text(text)
+
+    def get_source_text(self):
+        return self.workspace.get_source_text()
+
+    def get_source_lang(self):
+        return self.workspace.get_source_lang()
+
+    def set_target_text(self, text):
+        self.workspace.set_target_text(text)
+
+    def get_target_text(self):
+        return self.workspace.get_target_text()
+
+    def get_target_lang(self):
+        return self.workspace.get_target_lang()
 
 
 def main():
-    AiTranslator().run()
+    app = QtWidgets.QApplication([])
+
+    window = MainWindow()
+    window.show()
+
+    app.exec()
 
 
 if __name__ == "__main__":
