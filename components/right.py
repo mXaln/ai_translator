@@ -15,8 +15,15 @@ class RightLayout(QtWidgets.QVBoxLayout):
         self.combo.setMaxVisibleItems(20)
         self.combo.setCurrentIndex(-1)
 
+        combo_font = self.combo.font()
+        combo_font.setPointSize(16)
+        self.combo.setFont(combo_font)
+
         self.text_edit.setReadOnly(True)
         self.text_edit.setObjectName("target_text")
+        font = self.text_edit.font()
+        font.setPointSize(16)
+        self.text_edit.setFont(font)
 
         self.addWidget(self.combo)
         self.addWidget(self.text_edit)

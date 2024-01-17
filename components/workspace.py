@@ -18,6 +18,7 @@ class WorkspaceWidget(QtWidgets.QWidget):
         translate_btn.clicked.connect(self.on_translate)
         translate_btn.setMinimumHeight(30)
         translate_btn.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.PointingHandCursor))
+        translate_btn.setFont(QtGui.QFont("Times", 16))
 
         translate_btn.setStyleSheet("""
             QPushButton {
@@ -25,6 +26,7 @@ class WorkspaceWidget(QtWidgets.QWidget):
                 background-color: rgb(0, 64, 184);
                 border-radius : 4px;
                 border: 1px solid rgb(0, 25, 71);
+                font-size: 10vw;
             }
             QPushButton:hover {
                 background-color: rgb(0, 44, 122);
