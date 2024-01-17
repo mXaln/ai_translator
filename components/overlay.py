@@ -8,7 +8,10 @@ class OverlayWidget(QtWidgets.QLabel):
 
         self.setText(message)
         self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
-        self.setFont(QtGui.QFont("Times", 16))
+
+        font = self.font()
+        font.setPointSize(16)
+        self.setFont(font)
 
         palette = self.palette()
         palette.setColor(QtGui.QPalette.ColorRole.Window, QtGui.QColor(22, 22, 22, 200))

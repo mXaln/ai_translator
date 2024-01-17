@@ -18,7 +18,10 @@ class WorkspaceWidget(QtWidgets.QWidget):
         translate_btn.clicked.connect(self.on_translate)
         translate_btn.setMinimumHeight(30)
         translate_btn.setCursor(QtGui.QCursor(QtCore.Qt.CursorShape.PointingHandCursor))
-        translate_btn.setFont(QtGui.QFont("Times", 16))
+
+        btn_font = translate_btn.font()
+        btn_font.setPointSize(16)
+        translate_btn.setFont(btn_font)
 
         translate_btn.setStyleSheet("""
             QPushButton {
